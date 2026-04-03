@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bagisto Headless - Nguyễn Văn Hiếu</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      color: #333;
+    }
+
+    /* ===== HEADER ===== */
+    header {
+      background: linear-gradient(135deg, #e63946, #c1121f);
+      color: white;
+      padding: 24px 40px;
+      text-align: center;
+    }
+    header h1 {
+      font-size: 2rem;
+      letter-spacing: 1px;
+    }
+    header p {
+      font-size: 1.1rem;
+      margin-top: 6px;
+      opacity: 0.9;
+    }
+
+    /* ===== MAIN ===== */
+    main {
+      max-width: 1100px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    main h2 {
+      font-size: 1.4rem;
+      margin-bottom: 24px;
+      color: #c1121f;
+      border-left: 4px solid #c1121f;
+      padding-left: 12px;
+    }
+
+    /* ===== LOADING / ERROR ===== */
+    #status {
+      text-align: center;
+      font-size: 1rem;
+      color: #666;
+      margin: 40px 0;
+    }
+
+    /* ===== PRODUCT GRID ===== */
+    #product-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 24px;
+    }
+
+    /* ===== CARD ===== */
+    .card {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.13);
+    }
+    .card h3 {
+      font-size: 1rem;
+      color: #222;
+    }
+    .card .price {
+      font-size: 1.15rem;
+      font-weight: bold;
+      color: #e63946;
+    }
+    .card button {
+      margin-top: auto;
+      padding: 10px;
+      background: #e63946;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      transition: background 0.2s;
+    }
+    .card button:hover {
+      background: #c1121f;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER: Hiển thị họ tên và MSSV nổi bật -->
+  <header>
+    <h1>Nguyễn Văn Hiếu</h1>
+    <p>MSSV: SV001 &nbsp;|&nbsp; Bài thực hành Headless Commerce - Bagisto</p>
+  </header>
+
+  <main>
+    <h2>Danh sách sản phẩm mới nhất</h2>
+    <div id="status">Đang tải dữ liệu...</div>
+    <div id="product-list"></div>
+  </main>
+
+  <script>
+    // ============================================================
+    // CẤU HÌNH: Địa chỉ GraphQL endpoint của Bagisto Headless
+    // SỬ DỤNG DEMO API vì Bagisto v2.2.3 không có GraphQL
+    // ============================================================
+    const GRAPHQL_ENDPOINT = "https://demo.bagisto.com/graphql";
+
+    // ============================================================
+    // QUERY GraphQL: Lấy 05 sản phẩm mới nhất
+    // Chỉ lấy đúng các trường cần thiết (id, name, price,
+    // description, url_key) - đây là ưu điểm của GraphQL so với
+    // REST API (tránh over-fetching dữ liệu thừa)
+    // ============================================================
+    const GET_PRODUCTS_QUERY = `
+      query GetLatestProducts {
+        products(first: 5, page: 1) {
+          data {
+            id
+            name
+            price
+            description
+            url_key
+          }
+        }
+      }
+    `;
+
+    // ============================================================
+    // HÀM GỌI API: Sử dụng Fetch API gửi POST request đến
+    // GraphQL endpoint với query đã định nghĩa ở trên.
+    // GraphQL luôn dùng POST và truyền query trong body JSON.
+    // ============================================================
+    async function fetchProducts() {
+      try {
+        const response = await fetch(GRAPHQL_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query: GET_PRODUCTS_QUERY })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        if (result.errors) {
+          throw new Error(result.errors[0].message);
+        }
+
+        return result.data.products.data;
+
+      } catch (error) {
+        document.getElementById("status").textContent =
+          "Lỗi khi tải dữ liệu: " + error.message;
+        console.error("Fetch error:", error);
+        return [];
+      }
+    }
+
+    // ============================================================
+    // HÀM ĐỊNH DẠNG TIỀN TỆ: Chuyển số thành chuỗi VNĐ
+    // Ví dụ: 150000 -> "150.000 ₫"
+    // ============================================================
+    function formatCurrency(amount) {
+      return new Intl.NumberFormat("vi-VN", {
+        style: "currency",
+        currency: "VND"
+      }).format(amount);
+    }
+
+    // ============================================================
+    // HÀM RENDER: Tạo các thẻ Card từ dữ liệu sản phẩm
+    // và chèn vào DOM
+    // ============================================================
+    function renderProducts(products) {
+      const container = document.getElementById("product-list");
+      const status    = document.getElementById("status");
+
+      if (!products || products.length === 0) {
+        status.textContent = "Không có sản phẩm nào.";
+        return;
+      }
+
+      // Ẩn thông báo loading khi đã có dữ liệu
+      status.style.display = "none";
+
+      products.forEach(product => {
+        // Tạo thẻ card cho từng sản phẩm
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <h3>${product.name}</h3>
+          <p class="price">${formatCurrency(product.price)}</p>
+          <button onclick="window.location.href='http://localhost:8000/${product.url_key}'">
+            Chi tiết
+          </button>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // ============================================================
+    // KHỞI CHẠY: Gọi API và render kết quả khi trang load xong
+    // ============================================================
+    (async () => {
+      const products = await fetchProducts();
+      renderProducts(products);
+    })();
+  </script>
+
+</body>
+</html>
